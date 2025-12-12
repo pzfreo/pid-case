@@ -23,7 +23,7 @@ PID_BODY_D = 80.0
 PID_BEZEL_W = 48.0
 PID_BEZEL_H = 48.0
 PID_BEZEL_D = 9.0
-PID_FLOOR_CLEARANCE = 8.0
+PID_FLOOR_CLEARANCE = 12.0 # Increased to 12mm
 
 # -- SSR + Heatsink --
 SSR_W = 50.0
@@ -60,6 +60,10 @@ ANCHOR_HEIGHT = 8.0
 ANCHOR_HOLE_W = 5.0   
 ANCHOR_HOLE_H = 3.5   
 
+# -- Lid Rebate (New) --
+LID_REBATE_DEPTH = 2.0
+LID_REBATE_TOLERANCE = 0.4 # "Leeway" for the lid fit
+
 # -- Derived Dimensions --
 BASE_WIDTH = max(SSR_W, PID_BEZEL_W) + WIRING_MARGIN * 2
 REAR_LAYOUT_W = PORCH_EXT_W + 20 + (CABLE_SPACING + CABLE_DIA*2) + 20
@@ -90,14 +94,13 @@ term_center_y = BOX_L/2 + TERM_D/2
 term_pos_z = WALL_THICKNESS + TERM_H/2
 
 # ==============================================================================
-# 2. PRE-BUILD COMPONENTS (Master Anchor)
+# 2. PRE-BUILD COMPONENTS
 # ==============================================================================
 with BuildPart() as master_anchor:
     Box(12, 15, ANCHOR_HEIGHT, align=(Align.CENTER, Align.MAX, Align.MIN))
     with Locations((0, -7.5, ANCHOR_HEIGHT/2)): 
             Box(20, ANCHOR_HOLE_W, ANCHOR_HOLE_H, mode=Mode.SUBTRACT)
     
-    # Fillet edges (Safe filter for vertical edges near the hole)
     entry_edges = master_anchor.edges().filter_by(
         lambda e: abs(e.center().X) > 5.9 and 2.0 < e.center().Z < 6.0
     )
@@ -230,34 +233,74 @@ with BuildPart() as body:
          with Locations((0,0, BOX_H)):
              Cylinder(radius=1.4, height=15, align=(Align.CENTER, Align.CENTER, Align.MAX), mode=Mode.SUBTRACT)
 
+    # K. Side Intake Vents (New Feature)
+    # Position: Y aligned with SSR, Z low down
+    # We cut through the X-axis walls (Left and Right)
+    vent_z = WALL_THICKNESS + 6.0 # Start 6mm off the floor
+    
+    # We create a box that represents the cutout and mirror it
+    with Locations((BOX_W/2, ssr_center_y, vent_z)):
+        # Array of 4 slots
+        with GridLocations(0, 10, 1, 4):
+            # Box(Width, Thickness, Height) - Width is cutting depth (X), Thickness is slot length (Y)
+            # Rotation=(90,0,0) makes the slot align along Y
+            Box(WALL_THICKNESS*4, 6, 4, rotation=(0, 0, 0), mode=Mode.SUBTRACT)
+    
+    with Locations((-BOX_W/2, ssr_center_y, vent_z)):
+        with GridLocations(0, 10, 1, 4):
+            Box(WALL_THICKNESS*4, 6, 4, rotation=(0, 0, 0), mode=Mode.SUBTRACT)
+
+
 # ==============================================================================
 # 5. BUILD LID
 # ==============================================================================
 
 with BuildPart() as lid:
+    # 1. Main Lid Plate
     with BuildSketch():
         Rectangle(BOX_W, BOX_L)
         fillet(vertices(), radius=FILLET_R)
     extrude(amount=LID_THICKNESS)
     
+    # 2. The Rebate (Lip) - Extrude DOWNWARDS from bottom
+    # Size: Internal Width minus tolerance
+    # Must ensure we don't intersect the corner bosses.
+    with BuildSketch(faces().sort_by(Axis.Z)[0]): # Select Bottom Face
+        # Create the lip profile
+        Rectangle(INTERNAL_W - LID_REBATE_TOLERANCE*2, INTERNAL_L - LID_REBATE_TOLERANCE*2)
+        
+        # Cut out the corners for the bosses + tolerance
+        with Locations(
+            (INTERNAL_W/2 - BOSS_SIZE/2, INTERNAL_L/2 - BOSS_SIZE/2),
+            (-INTERNAL_W/2 + BOSS_SIZE/2, INTERNAL_L/2 - BOSS_SIZE/2),
+            (INTERNAL_W/2 - BOSS_SIZE/2, -INTERNAL_L/2 + BOSS_SIZE/2),
+            (-INTERNAL_W/2 + BOSS_SIZE/2, -INTERNAL_L/2 + BOSS_SIZE/2)
+        ):
+            # Boss is 4mm radius (8mm dia) + some clearance
+            Circle(radius=BOSS_SIZE/2 + LID_REBATE_TOLERANCE, mode=Mode.SUBTRACT)
+            
+    extrude(amount=LID_REBATE_DEPTH) # Extrudes normal to face (downwards)
+
+    
     hole_offset_x = INTERNAL_W/2 - BOSS_SIZE/2
     hole_offset_y = INTERNAL_L/2 - BOSS_SIZE/2
     
-    # Mounting Holes
+    # Mounting Holes (Counterbored from Top)
     with Locations(
         (hole_offset_x, hole_offset_y, LID_THICKNESS), (-hole_offset_x, hole_offset_y, LID_THICKNESS),
         (hole_offset_x, -hole_offset_y, LID_THICKNESS), (-hole_offset_x, -hole_offset_y, LID_THICKNESS)
     ):
         CounterBoreHole(radius=1.7, counter_bore_radius=3.1, counter_bore_depth=2.0)
 
-    # 1. Ventilation (CUT FIRST - Ensures clean through holes)
+    # 3. Ventilation (Cut through ALL)
     with BuildSketch(faces().sort_by(Axis.Z)[-1]):
         with Locations((0, ssr_center_y)):
             with GridLocations(x_spacing=6, y_spacing=0, x_count=int(SSR_W/6), y_count=1):
                 SlotOverall(width=SSR_L - 10, height=3, rotation=90)
-    extrude(amount=-LID_THICKNESS, mode=Mode.SUBTRACT)
+    # Cut through lid AND the new rebate lip
+    extrude(amount=-(LID_THICKNESS + LID_REBATE_DEPTH), mode=Mode.SUBTRACT)
 
-    # 2. Embossed Label (ADD SECOND - Sits on top)
+    # 4. Embossed Label
     with BuildSketch(faces().sort_by(Axis.Z)[-1]):
         with Locations((0, -60)): 
              Text(MAIN_LABEL_1, font_size=12, font_style=FontStyle.BOLD, rotation=0, align=(Align.CENTER, Align.CENTER))
