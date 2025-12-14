@@ -4,7 +4,6 @@ from ocp_vscode import show, show_object, set_port, set_defaults, Camera
 # ==============================================================================
 # 1. CONFIGURATION SWITCH
 # ==============================================================================
-# False = Prototype Mode (M3 self-tapping screws everywhere)
 USE_INSERTS = False 
 
 # ==============================================================================
@@ -36,8 +35,10 @@ else:
     THREAD_M35_DIA = 2.8      
 
 # -- Components --
-PID_BODY_W, PID_BODY_H, PID_BODY_D = 44.0, 44.0, 80.0
-PID_BEZEL_W, PID_BEZEL_H = 48.0, 48.0
+# Standard 1/16 DIN Inkbird Sizes
+PID_BODY_W, PID_BODY_H = 45.0, 45.0   
+PID_BODY_D = 100.0                    
+PID_BEZEL_W, PID_BEZEL_H = 48.0, 48.0 
 PID_FLOOR_CLEARANCE = 12.0 
 
 SSR_W, SSR_L, SSR_H = 50.0, 80.0, 73.0
@@ -100,10 +101,10 @@ with BuildPart() as base:
         fillet(vertices(), radius=FILLET_R)
     extrude(amount=BASE_THICKNESS)
     
-    # SSR Standoffs (Reduced Platform)
+    # SSR Mounts
     with Locations((ssr_x, ssr_y, BASE_THICKNESS)):
         with Locations((0, SSR_MOUNT_SPACING/2), (0, -SSR_MOUNT_SPACING/2)):
-            Cylinder(radius=6.0, height=SSR_PLATFORM_HEIGHT, align=(Align.CENTER, Align.CENTER, Align.MIN))
+            Box(SSR_W, 12.0, SSR_PLATFORM_HEIGHT, align=(Align.CENTER, Align.CENTER, Align.MIN))
 
     # SSR Base Grill
     with BuildSketch(Plane.XY):
@@ -154,7 +155,7 @@ with BuildPart() as base:
 
 
 # ==============================================================================
-# 5. BUILD SHELL
+# 5. BUILD SHELL (With Clamp Posts)
 # ==============================================================================
 with BuildPart() as shell:
     with BuildSketch():
@@ -180,6 +181,24 @@ with BuildPart() as shell:
     # PID Cutout
     with Locations((pid_x, -BOX_L/2, pid_z + PID_BODY_H/2)):
         Box(PID_BODY_W + FIT_TOLERANCE, WALL_THICKNESS*4, PID_BODY_H + FIT_TOLERANCE, mode=Mode.SUBTRACT)
+
+    # --- NEW: PID Clamp Posts ---
+    # Two posts growing from the Front Face (inside) up to 48mm height
+    clamp_post_h = 48.0 # Just taller than the PID body (45mm)
+    clamp_spacing = PID_BODY_W + 10.0 # 5mm clearance each side
+    with Locations((pid_x, -BOX_L/2 + WALL_THICKNESS, pid_z + PID_BODY_H/2)):
+        # We need to rotate coordinates to build on the floor (Front Face Inner)
+        # Actually easiest to place them relative to Global Z=0 (Top of box)? No, relative to front wall.
+        # Front wall is at Y = -BOX_L/2
+        pass
+
+    # Let's place them relative to the PID center
+    with Locations((pid_x, -BOX_L/2 + WALL_THICKNESS, pid_z + PID_BODY_H/2)):
+         with Locations((clamp_spacing/2, 0, 0), (-clamp_spacing/2, 0, 0)):
+             # Cylinder pointing +Y (into the case)
+             Cylinder(radius=4.0, height=clamp_post_h, rotation=(90, 0, 0), align=(Align.CENTER, Align.CENTER, Align.MIN))
+             # Screw Hole
+             Cylinder(radius=THREAD_M3_DIA/2, height=clamp_post_h, rotation=(90, 0, 0), align=(Align.CENTER, Align.CENTER, Align.MIN), mode=Mode.SUBTRACT)
 
     # Socket Mounts
     left_screw_x = socket_x - UK_SOCKET_MOUNT_PITCH/2
@@ -217,11 +236,6 @@ with BuildPart() as shell:
         with Locations((C14_SCREW_PITCH/2, 0), (-C14_SCREW_PITCH/2, 0)):
              Cylinder(radius=THREAD_M3_DIA/2, height=30.0, rotation=(90,0,0), mode=Mode.SUBTRACT)
 
-    # Front Vents
-    with Locations((ssr_x, -BOX_L/2, BOX_H/2)):
-         with GridLocations(6, 0, 5, 1):
-             Box(3.0, 10.0, 30.0, mode=Mode.SUBTRACT)
-
     # Lid Vents
     with BuildSketch(Plane.XY.offset(BOX_H)):
         with Locations((ssr_x, ssr_y)):
@@ -235,19 +249,36 @@ with BuildPart() as shell:
 
 
 # ==============================================================================
-# 6. EXPORT
+# 6. BUILD CLAMP BAR (Separate Part)
+# ==============================================================================
+with BuildPart() as clamp_bar:
+    with BuildSketch():
+        # Width: Spanning the posts + extra
+        # Height: 10mm bar
+        Rectangle(PID_BODY_W + 20.0, 10.0)
+        fillet(vertices(), radius=2.0)
+    extrude(amount=3.0) # 3mm thick bar
+    
+    # Holes matching the posts
+    with Locations((clamp_spacing/2, 0), (-clamp_spacing/2, 0)):
+         Cylinder(radius=SCREW_M3_CLEARANCE/2, height=10.0, align=(Align.CENTER, Align.CENTER, Align.CENTER), mode=Mode.SUBTRACT)
+
+
+# ==============================================================================
+# 7. EXPORT
 # ==============================================================================
 print(f"Shell Dimensions: {BOX_W:.1f} x {BOX_L:.1f} x {BOX_H:.1f} mm")
-print(f"Mode: {'PRODUCTION (INSERTS)' if USE_INSERTS else 'PROTOTYPE (DIRECT SCREW)'}")
 
 export_stl(base.part, "pid_inv_base.stl")
 export_stl(shell.part, "pid_inv_shell.stl")
+export_stl(clamp_bar.part, "pid_inv_clamp_bar.stl") # Don't forget to print this!
 
 # ==============================================================================
-# 7. VISUALIZATION
+# 8. VISUALIZATION
 # ==============================================================================
 shell_viz = shell.part.move(Location((0,0, 60)))
 base_viz = base.part
+clamp_viz = clamp_bar.part.move(Location((pid_x, -BOX_L/2 + 45.0, pid_z + PID_BODY_H/2))).rotate(Axis.X, 90)
 
 # Ghosts
 pid_ghost = Location((pid_x, pid_y, pid_z + PID_BODY_H/2)) * Box(PID_BODY_W, PID_BODY_D, PID_BODY_H)
@@ -258,6 +289,7 @@ c14_ghost = Location((c14_x, c14_ghost_y, c14_z)) * Box(C14_BODY_W, C14_GHOST_DE
 
 show_object(base_viz, name="Base Plate", options={"alpha": 1.0, "color": (0.3, 0.3, 0.3)})
 show_object(shell_viz, name="Shell (Raised)", options={"alpha": 0.6, "color": (0.9, 0.9, 0.9)})
+show_object(clamp_viz, name="Clamp Bar (Green)", options={"alpha": 1.0, "color": (0.0, 1.0, 0.0)})
 show_object(pid_ghost, name="PID Ghost", options={"alpha": 0.3, "color": (1, 0, 0)})
 show_object(ssr_ghost, name="SSR Ghost", options={"alpha": 0.3, "color": (0, 1, 0)})
 show_object(term_ghost, name="Terminal Ghost", options={"alpha": 0.3, "color": (0, 0, 1)})

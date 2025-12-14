@@ -4,7 +4,6 @@ from ocp_vscode import show, show_object, set_port, set_defaults, Camera
 # ==============================================================================
 # 1. CONFIGURATION SWITCH
 # ==============================================================================
-# False = Prototype Mode (M3 self-tapping screws everywhere)
 USE_INSERTS = False 
 
 # ==============================================================================
@@ -36,8 +35,10 @@ else:
     THREAD_M35_DIA = 2.8      
 
 # -- Components --
-PID_BODY_W, PID_BODY_H, PID_BODY_D = 44.0, 44.0, 80.0
-PID_BEZEL_W, PID_BEZEL_H = 48.0, 48.0
+# Standard 1/16 DIN Inkbird Sizes
+PID_BODY_W, PID_BODY_H = 45.0, 45.0   
+PID_BODY_D = 100.0                    
+PID_BEZEL_W, PID_BEZEL_H = 48.0, 48.0 
 PID_FLOOR_CLEARANCE = 12.0 
 
 SSR_W, SSR_L, SSR_H = 50.0, 80.0, 73.0
@@ -74,7 +75,10 @@ BOX_H = INTERNAL_H + ROOF_THICKNESS
 # ==============================================================================
 pid_x = -INTERNAL_W/2 + SIDE_MARGIN + PID_BODY_W/2
 pid_y = -INTERNAL_L/2 + PID_BODY_D/2 
-pid_z = 20.0 
+# PID Position: Starts 20mm up from Z=0
+pid_z_start = 20.0 
+pid_z_end = pid_z_start + PID_BODY_H + FIT_TOLERANCE 
+pid_z_center = pid_z_start + (PID_BODY_H + FIT_TOLERANCE)/2
 
 ssr_x = INTERNAL_W/2 - SIDE_MARGIN - SSR_W/2
 ssr_y = -INTERNAL_L/2 + 20 + SSR_L/2
@@ -100,10 +104,10 @@ with BuildPart() as base:
         fillet(vertices(), radius=FILLET_R)
     extrude(amount=BASE_THICKNESS)
     
-    # SSR Standoffs (Reduced Platform)
+    # SSR Mounts
     with Locations((ssr_x, ssr_y, BASE_THICKNESS)):
         with Locations((0, SSR_MOUNT_SPACING/2), (0, -SSR_MOUNT_SPACING/2)):
-            Cylinder(radius=6.0, height=SSR_PLATFORM_HEIGHT, align=(Align.CENTER, Align.CENTER, Align.MIN))
+            Box(SSR_W, 12.0, SSR_PLATFORM_HEIGHT, align=(Align.CENTER, Align.CENTER, Align.MIN))
 
     # SSR Base Grill
     with BuildSketch(Plane.XY):
@@ -178,8 +182,36 @@ with BuildPart() as shell:
             Cylinder(radius=THREAD_M3_DIA/2, height=post_h, align=(Align.CENTER, Align.CENTER, Align.MAX), mode=Mode.SUBTRACT)
 
     # PID Cutout
-    with Locations((pid_x, -BOX_L/2, pid_z + PID_BODY_H/2)):
+    with Locations((pid_x, -BOX_L/2, pid_z_center)):
         Box(PID_BODY_W + FIT_TOLERANCE, WALL_THICKNESS*4, PID_BODY_H + FIT_TOLERANCE, mode=Mode.SUBTRACT)
+
+    # --- FINAL CLAMP LOGIC ---
+    # Width=50, Depth=8
+    clamp_w, clamp_d = 50.0, 8.0
+    # Attached to the inside face of the front wall
+    clamp_y_center = -BOX_L/2 + WALL_THICKNESS + clamp_d/2
+
+    # 1. THE BRACE (Anvil)
+    # Extends from Top of PID (Z=65) to Roof Inner Surface (Z=97)
+    roof_inner_z = BOX_H - ROOF_THICKNESS
+    brace_h = roof_inner_z - pid_z_end
+    brace_z_center = pid_z_end + brace_h/2
+    
+    with Locations((pid_x, clamp_y_center, brace_z_center)):
+        Box(clamp_w, clamp_d, brace_h, align=(Align.CENTER, Align.CENTER, Align.CENTER))
+
+    # 2. THE CLAMP (Hammer)
+    # Extends from Bottom of PID (Z=20) down by 10mm (ends at Z=10)
+    # Does not reach Z=0.
+    clamp_h = 10.0
+    clamp_z_center = pid_z_start - clamp_h/2
+    
+    with Locations((pid_x, clamp_y_center, clamp_z_center)):
+        # Block
+        Box(clamp_w, clamp_d, clamp_h, align=(Align.CENTER, Align.CENTER, Align.CENTER))
+        # Threaded Hole (Vertical through center)
+        Cylinder(radius=THREAD_M3_DIA/2, height=clamp_h + 20.0, align=(Align.CENTER, Align.CENTER, Align.CENTER), mode=Mode.SUBTRACT)
+
 
     # Socket Mounts
     left_screw_x = socket_x - UK_SOCKET_MOUNT_PITCH/2
@@ -217,11 +249,6 @@ with BuildPart() as shell:
         with Locations((C14_SCREW_PITCH/2, 0), (-C14_SCREW_PITCH/2, 0)):
              Cylinder(radius=THREAD_M3_DIA/2, height=30.0, rotation=(90,0,0), mode=Mode.SUBTRACT)
 
-    # Front Vents
-    with Locations((ssr_x, -BOX_L/2, BOX_H/2)):
-         with GridLocations(6, 0, 5, 1):
-             Box(3.0, 10.0, 30.0, mode=Mode.SUBTRACT)
-
     # Lid Vents
     with BuildSketch(Plane.XY.offset(BOX_H)):
         with Locations((ssr_x, ssr_y)):
@@ -238,7 +265,6 @@ with BuildPart() as shell:
 # 6. EXPORT
 # ==============================================================================
 print(f"Shell Dimensions: {BOX_W:.1f} x {BOX_L:.1f} x {BOX_H:.1f} mm")
-print(f"Mode: {'PRODUCTION (INSERTS)' if USE_INSERTS else 'PROTOTYPE (DIRECT SCREW)'}")
 
 export_stl(base.part, "pid_inv_base.stl")
 export_stl(shell.part, "pid_inv_shell.stl")
@@ -250,7 +276,7 @@ shell_viz = shell.part.move(Location((0,0, 60)))
 base_viz = base.part
 
 # Ghosts
-pid_ghost = Location((pid_x, pid_y, pid_z + PID_BODY_H/2)) * Box(PID_BODY_W, PID_BODY_D, PID_BODY_H)
+pid_ghost = Location((pid_x, pid_y, pid_z_center)) * Box(PID_BODY_W, PID_BODY_D, PID_BODY_H)
 ssr_ghost = Location((ssr_x, ssr_y, ssr_z + SSR_H/2)) * Box(SSR_W, SSR_L, SSR_H)
 term_ghost = Location((term_x, term_y, BASE_THICKNESS + TERM_BOSS_HEIGHT + TERM_H/2)) * Box(TERM_W, TERM_D, TERM_H)
 c14_ghost_y = (BOX_L/2) - (C14_GHOST_DEPTH / 2)
