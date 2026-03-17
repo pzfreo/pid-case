@@ -1,0 +1,25 @@
+[pipeline]
+stages = ["load", "arrange", "plate", "slice", "print"]
+
+[plate]
+size = [256, 256]
+padding = 5.0
+
+[slicer]
+engine = "orca"
+printer = "Bambu Lab P1S 0.4 nozzle"
+process = "0.08mm High Quality @BBL X1C"
+filaments = ["Generic PETG-CF @base"]
+
+[[parts]]
+file = "pid_inv_base.step"
+
+[[parts]]
+file = "pid_inv_shell.step"
+
+[[parts]]
+file = "pid_m3_washer.step"
+copies = 4
+
+[printer]
+name = "workshop"
