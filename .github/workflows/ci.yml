@@ -14,11 +14,11 @@ jobs:
     steps:
     # 1. Check out the repository code
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
 
     # 2. Set up Python
     - name: Set up Python 3.10
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6
       with:
         python-version: "3.10"
 
@@ -36,7 +36,7 @@ jobs:
     # 5. (Optional) Upload Artifacts
     # This saves the generated files so you can download them from the Actions tab.
     - name: Upload STL and STEP files
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: Generated-Geometry
         path: |
